@@ -1,0 +1,83 @@
+service: simple-aws-api-demo # This is your service name
+
+provider:
+  name   : aws  # our environment will be in AWS but serverless can deploy in other places such as Azure and Google
+  apiKeys:
+    - simple-aws-api-demo-${{self:provider.stage}}
+  runtime: python3.7
+  region : us-east-1 # our AWS region
+  timeout: 5
+  stage  : dev
+  memorySize: 128
+  environment:
+    tableName: "demo-dynamo-table-${{self:provider.stage}}" # creates an env variable to reference our table name
+  variableSyntax: "\\${{([ ~:a-zA-Z0-9._@\\'\",\\-\\/\\(\\)]+?)}}" # let's serverless know how we are referencing our variables
+
+functions:
+  create_user:
+    handler: functions/create_user.handler # the handler is the entry point to your code
+    timeout: 10
+    memorySize: 512
+    description: Receives user info and writes it to DynamoDB
+    iamRoleStatementsName: simple-aws-api-demo-dynamodb-write-role
+    iamRoleStatements:
+      - Effect: "Allow"
+        Action:
+          - dynamodb:PutItem  # allow this function to write to Dynamo
+        Resource: "arn:aws:dynamodb:${{self:provider.region}}:*:table/${{self:provider.environment.tableName}}"
+    events:
+      - http:   # this will create our API endpoint for us in the APIGateway
+          path: /create_user  # our endpoint path
+          method: post
+          private: true
+
+  get_user:
+    handler: functions/get_user.handler # the handler is the entry point to your code
+    timeout: 10
+    memorySize: 512
+    description: Retreives user info from DynamoDB
+    iamRoleStatementsName: simple-aws-api-demo-dynamodb-read-role
+    iamRoleStatements:
+      - Effect: "Allow"
+        Action:
+          - dynamodb:GetItem  # allow this function to read from Dynamo
+        Resource: "arn:aws:dynamodb:${{self:provider.region}}:*:table/${{self:provider.environment.tableName}}"
+    events:
+      - http:
+          path: /get_user/{email}
+          method: get
+          private: true
+
+  delete_user:
+    handler: functions/delete_user.handler # the handler is the entry point to your code
+    timeout: 10
+    memorySize: 512
+    description: Delete user info from DynamoDB
+    iamRoleStatementsName: simple-aws-api-demo-dynamodb-delete-role
+    iamRoleStatements:
+      - Effect: "Allow"
+        Action:
+          - dynamodb:DeleteItem  # allow this function to delete from Dynamo
+        Resource: "arn:aws:dynamodb:${{self:provider.region}}:*:table/${{self:provider.environment.tableName}}"
+    events:
+      - http:
+          path: /delete_user/{email}
+          method: delete
+          private: true
+
+resources: # everything below uses CloudFormation template syntax, which is the AWS syntax
+  Resources:
+    dynamoDBTable:                            # our resource name (can be what ever you want)
+      Type: 'AWS::DynamoDB::Table'            # our resource type, follows AWS convention
+      Properties:
+        TableName: '${{self:provider.environment.tableName}}'   # looks at our environment variable for the table name
+        AttributeDefinitions:                                 # our column names and types
+          - AttributeName: userEmail                          # dynamo doesnt require you to list all of your columns...
+            AttributeType: S                                  # ...only those you will define as Primary Keys
+        KeySchema:
+          - AttributeName: userEmail                          # This will be our PK
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST    # We are choosing to use this billing mode since it will be the cheapest for this demo
+
+plugins:
+  - serverless-iam-roles-per-function
